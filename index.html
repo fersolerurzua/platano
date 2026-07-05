@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gastos compartidos</title>
+
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
+
+<style>
+:root{
+  --bg:#FAF7F2;
+  --card:#FFFFFF;
+  --text:#2F2A26;
+  --muted:#7B6D62;
+  --border:#E6DDD4;
+  --accent:#B85C38;
+  --accent2:#D98E5F;
+  --danger:#B23A48;
+}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  max-width:760px;
+  margin:0 auto;
+  padding:18px;
+  background:var(--bg);
+  color:var(--text);
+}
+h1{font-size:30px;margin:10px 0 2px}
+h3{margin:0 0 12px}
+.brand-subtitle{margin-bottom:18px;color:var(--muted);font-size:14px}
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:16px;
+  margin-bottom:14px;
+  box-shadow:0 3px 12px rgba(96,58,32,.08);
+}
+.big{font-size:34px;font-weight:850;margin-top:4px}
+.label,.small{color:var(--muted);font-size:13px;line-height:1.45}
+input,select,button{
+  width:100%;
+  box-sizing:border-box;
+  padding:12px;
+  font-size:16px;
+  margin:6px 0;
+  border-radius:12px;
+  border:1px solid var(--border);
+}
+input,select{background:var(--card);color:var(--text)}
+button{cursor:pointer;border:none;background:var(--accent);color:white;font-weight:700}
+.item{border-top:1px solid var(--border);padding:12px 0}
+.item:first-child{border-top:none}
+.category-title{font-weight:800;font-size:18px}
+.negative{color:var(--danger)}
+.progress{height:10px;background:rgba(127,127,127,.18);border-radius:999px;overflow:hidden;margin:8px 0}
+.bar{height:100%;background:var(--accent2);width:0%}
+#toast{
+  display:none;
+  position:fixed;
+  bottom:20px;
+  left:50%;
+  transform:translateX(-50%);
+  background:#111;
+  color:white;
+  padding:10px 16px;
+  border-radius:22px;
+  z-index:20;
+}
+</style>
+</head>
+
+<body>
+<h1>Gastos compartidos</h1>
+<div class="brand-subtitle">by TarTeTaTin</div>
+
+<div class="card">
+  <div class="label">Saldo total compartido</div>
+  <div class="big" id="saldoTotal">$0</div>
+  <div class="small" id="estado">Cargando datos...</div>
+</div>
+
+<div class="card">
+  <h3>Registrar gasto</h3>
+  <input type="number" inputmode="numeric" pattern="[0-9]*" id="monto" placeholder="Monto">
+  <input type="text" id="descripcion" placeholder="Descripción">
+  <select id="categoria"></select>
+  <button onclick="registrarGasto()">Registrar gasto</button>
+</div>
+
+<div class="card">
+  <h3>Saldos por categoría</h3>
+  <div id="categorias"></div>
+</div>
+
+<div class="card">
+  <h3>Historial</h3>
+  <div id="historial"></div>
+</div>
+
+<div id="toast">Listo</div>
+
+<script>
+const API_URL = "https://script.google.com/macros/s/AKfycbxRndn5iSDB_gWX-v5evcBMJeTG6fEIpolJvpfLlRoCAyIbmBS9lZywmMdVWHqQ8lL0/exec";
+let categorias = [];
+let gastos = [];
+
+function formato(n){
+  const signo = n < 0 ? "-" : "";
+  return signo + "$" + Math.abs(Math.round(n)).toLocaleString("es-CL");
+}
+
+function toast(msg){
+  const t=document.getElementById("toast");
+  t.textContent=msg;
+  t.style.display="block";
+  setTimeout(()=>t.style.display="none",1600);
+}
+
+function jsonp(params){
+  return new Promise((resolve,reject)=>{
+    const cb="cb_"+Date.now()+"_"+Math.random().toString(16).slice(2);
+    params.callback=cb;
+
+    const s=document.createElement("script");
+    window[cb]=data=>{
+      resolve(data);
+      delete window[cb];
+      s.remove();
+    };
+
+    s.onerror=()=>{
+      reject(new Error("No se pudo cargar la información."));
+      delete window[cb];
+      s.remove();
+    };
+
+    s.src=API_URL+"?"+new URLSearchParams(params).toString();
+    document.body.appendChild(s);
+  });
+}
+
+async function postData(data){
+  await fetch(API_URL,{
+    method:"POST",
+    mode:"no-cors",
+    headers:{"Content-Type":"text/plain;charset=utf-8"},
+    body:JSON.stringify(data)
+  });
+}
+
+async function cargarDatos(){
+  try{
+    document.getElementById("estado").textContent="Actualizando...";
+    const data=await jsonp({action:"data"});
+    categorias=data.categorias||[];
+    gastos=data.gastos||[];
+    render();
+    document.getElementById("estado").textContent="Actualizado "+new Date().toLocaleTimeString("es-CL");
+  }catch(e){
+    document.getElementById("estado").textContent="No se pudieron cargar los datos.";
+    alert("No se pudieron cargar los datos. Revisa el Apps Script.");
+  }
+}
+
+async function registrarGasto(){
+  const monto=Number(document.getElementById("monto").value);
+  const descripcion=document.getElementById("descripcion").value.trim();
+  const categoria=document.getElementById("categoria").value;
+
+  if(!categoria){
+    alert("Selecciona una categoría.");
+    return;
+  }
+
+  if(!monto||monto<=0){
+    alert("Ingresa un monto válido.");
+    return;
+  }
+
+  await postData({
+    action:"addExpense",
+    categoria,
+    descripcion,
+    monto
+  });
+
+  document.getElementById("monto").value="";
+  document.getElementById("descripcion").value="";
+  toast("Gasto registrado ✓");
+
+  setTimeout(cargarDatos,1000);
+}
+
+function render(){
+  renderSelect();
+  renderCategorias();
+  renderHistorial();
+
+  const saldoTotal=categorias.reduce((a,c)=>a+Number(c.saldo||0),0);
+  const el=document.getElementById("saldoTotal");
+  el.textContent=formato(saldoTotal);
+  el.className=saldoTotal<0?"big negative":"big";
+}
+
+function renderSelect(){
+  const select=document.getElementById("categoria");
+  const actual=select.value;
+  select.innerHTML="";
+
+  if(categorias.length===0){
+    select.innerHTML='<option value="">No hay categorías</option>';
+    return;
+  }
+
+  categorias.forEach(c=>{
+    const opt=document.createElement("option");
+    opt.value=c.categoria;
+    opt.textContent=c.categoria;
+    select.appendChild(opt);
+  });
+
+  if(actual) select.value=actual;
+}
+
+function renderCategorias(){
+  const cont=document.getElementById("categorias");
+  cont.innerHTML="";
+
+  if(categorias.length===0){
+    cont.innerHTML="<div class='small'>Todavía no hay categorías. Agrégalas en la pestaña Categorias del Google Sheet.</div>";
+    return;
+  }
+
+  categorias.forEach(c=>{
+    const p=c.presupuesto>0?Math.min((c.gastado/c.presupuesto)*100,100):0;
+    const div=document.createElement("div");
+    div.className="item";
+    div.innerHTML=`
+      <div class="category-title">${c.categoria}</div>
+      <div class="small">Presupuesto: ${formato(c.presupuesto)}</div>
+      <div class="small">Gastado: ${formato(c.gastado)}</div>
+      <div class="small ${c.saldo<0?"negative":""}">Saldo: ${formato(c.saldo)}</div>
+      <div class="progress"><div class="bar" style="width:${p}%"></div></div>
+      <div class="small">${Math.round(p)}% usado</div>
+    `;
+    cont.appendChild(div);
+  });
+}
+
+function renderHistorial(){
+  const cont=document.getElementById("historial");
+  cont.innerHTML="";
+
+  if(gastos.length===0){
+    cont.innerHTML="<div class='small'>Todavía no hay gastos registrados.</div>";
+    return;
+  }
+
+  gastos.slice().reverse().forEach(g=>{
+    const div=document.createElement("div");
+    div.className="item";
+    div.innerHTML=`
+      <strong>${g.descripcion||"(sin descripción)"}</strong><br>
+      -${formato(g.monto)}<br>
+      <span class="small">${g.categoria}</span><br>
+      <span class="small">${g.fecha}</span>
+    `;
+    cont.appendChild(div);
+  });
+}
+
+cargarDatos();
+setInterval(cargarDatos,30000);
+</script>
+</body>
+</html>
