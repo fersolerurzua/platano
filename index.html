@@ -161,8 +161,12 @@ async function cargarDatos(){
     document.getElementById("estado").textContent="Actualizando...";
     const data=await jsonp({action:"data"});
     categorias=data.categorias||[];
-    gastos=data.gastos||[];
-    render();
+gastos=data.gastos||[];
+
+document.getElementById("periodoActual").textContent =
+  data.periodo || "Mes actual";
+
+render();
     document.getElementById("estado").textContent="Actualizado "+new Date().toLocaleTimeString("es-CL");
   }catch(e){
     document.getElementById("estado").textContent="No se pudieron cargar los datos.";
