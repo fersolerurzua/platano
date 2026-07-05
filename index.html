@@ -244,7 +244,15 @@ function renderCategorias(){
   }
 
   categorias.forEach(c=>{
-    const p=c.presupuesto>0?Math.min((c.gastado/c.presupuesto)*100,100):0;
+const p=c.presupuesto>0?Math.min((c.gastado/c.presupuesto)*100,100):0;
+
+let color = "#409176"; // verde
+
+if (p >= 90) {
+  color = "#B23A48"; // rojo
+} else if (p >= 75) {
+  color = "#D98E5F"; // naranja
+}
     const div=document.createElement("div");
     div.className="item";
     div.innerHTML=`
@@ -252,7 +260,7 @@ function renderCategorias(){
       <div class="small">Presupuesto: ${formato(c.presupuesto)}</div>
       <div class="small">Gastado: ${formato(c.gastado)}</div>
       <div class="small ${c.saldo<0?"negative":""}">Saldo: ${formato(c.saldo)}</div>
-      <div class="progress"><div class="bar" style="width:${p}%"></div></div>
+<div class="progress"><div class="bar" style="width:${p}%; background:${color}"></div></div>
       <div class="small">${Math.round(p)}% usado</div>
     `;
     cont.appendChild(div);
