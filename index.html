@@ -205,14 +205,20 @@ button:disabled{opacity:.6;cursor:not-allowed}
 #toast{
   display:none;
   position:fixed;
-  bottom:20px;
+  bottom:32px;
   left:50%;
   transform:translateX(-50%);
   background:#111;
   color:white;
-  padding:10px 16px;
-  border-radius:22px;
-  z-index:20;
+  padding:16px 22px;
+  border-radius:18px;
+  z-index:100;
+  font-size:17px;
+  font-weight:700;
+  text-align:center;
+  min-width:220px;
+  max-width:80%;
+  box-shadow:0 8px 24px rgba(0,0,0,.22);
 }
 </style>
 </head>
@@ -306,7 +312,7 @@ function toast(msg){
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.style.display = "block";
-  setTimeout(() => t.style.display = "none", 1600);
+setTimeout(() => t.style.display = "none", 3000);
 }
 
 function abrirDB(){
