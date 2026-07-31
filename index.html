@@ -390,7 +390,7 @@ function renderCategorias(){
     div.className = "category-card" + (abierta ? " open" : "");
 
     div.innerHTML = `
-      <div class="category-header" onclick="toggleCategoria(${JSON.stringify(c.categoria)})">
+      <div class="category-header">
         <div class="category-header-row">
           <div style="width:100%">
             <div class="category-title">${c.categoria}</div>
@@ -432,14 +432,20 @@ function renderCategorias(){
           <option value="Miguel">Miguel</option>
         </select>
 
-        <button
-          id="boton-${sufijo}"
-          onclick="registrarGastoEnCategoria(${JSON.stringify(c.categoria)})"
-        >
+        <button id="boton-${sufijo}">
           Registrar gasto
         </button>
       </div>
     `;
+
+    div.querySelector(".category-header").addEventListener("click", () => {
+      toggleCategoria(c.categoria);
+    });
+
+    div.querySelector("#boton-" + sufijo).addEventListener("click", (event) => {
+      event.stopPropagation();
+      registrarGastoEnCategoria(c.categoria);
+    });
 
     cont.appendChild(div);
   });
