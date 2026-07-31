@@ -155,13 +155,8 @@ button:disabled{opacity:.6;cursor:not-allowed}
   color:var(--danger);
   border:1px solid rgba(178,58,72,.22);
 }
-.pin-screen{
-  display:none;
-}
-.pin-card{
-  max-width:380px;
-  margin:40px auto 0;
-}
+.pin-screen{display:none}
+.pin-card{max-width:380px;margin:40px auto 0}
 .pin-input{
   text-align:center;
   letter-spacing:.35em;
@@ -173,9 +168,7 @@ button:disabled{opacity:.6;cursor:not-allowed}
   min-height:18px;
   margin-top:6px;
 }
-.app-content{
-  display:none;
-}
+.app-content{display:none}
 .logout-row{
   text-align:right;
   margin-top:-8px;
@@ -189,7 +182,7 @@ button:disabled{opacity:.6;cursor:not-allowed}
   color:var(--muted);
   border:1px solid var(--border);
 }
-.offline-note{
+.sync-note{
   display:none;
   margin-bottom:12px;
   padding:9px 12px;
@@ -198,6 +191,16 @@ button:disabled{opacity:.6;cursor:not-allowed}
   border:1px solid #E8D1A5;
   color:#7A5A22;
   font-size:13px;
+}
+.pending-badge{
+  display:inline-block;
+  margin-top:4px;
+  padding:3px 7px;
+  border-radius:999px;
+  background:#FFF4DE;
+  border:1px solid #E8D1A5;
+  color:#7A5A22;
+  font-size:11px;
 }
 #toast{
   display:none;
@@ -243,9 +246,7 @@ button:disabled{opacity:.6;cursor:not-allowed}
 <h1>Bananapp</h1>
 <div class="brand-subtitle">by TarTeTaTin</div>
 
-<div id="offlineNote" class="offline-note">
-  Sin conexión. Bananapp puede abrirse, pero todavía no guarda gastos nuevos offline.
-</div>
+<div id="syncNote" class="sync-note"></div>
 
 <div class="logout-row">
   <button class="logout-btn" id="logoutButton">Olvidar PIN</button>
@@ -283,10 +284,18 @@ button:disabled{opacity:.6;cursor:not-allowed}
 const API_URL = "https://script.google.com/macros/s/AKfycbxRndn5iSDB_gWX-v5evcBMJeTG6fEIpolJvpfLlRoCAyIbmBS9lZywmMdVWHqQ8lL0/exec";
 const PIN_KEY = "bananapp_pin";
 
+const DB_NAME = "bananapp_local";
+const DB_VERSION = 1;
+const STORE_STATE = "state";
+const STORE_OUTBOX = "outbox";
+
 let categorias = [];
 let gastos = [];
 let categoriaAbierta = null;
 let pinActual = localStorage.getItem(PIN_KEY) || "";
+let periodoActualTexto = "";
+let dbPromise = null;
+let sincronizando = false;
 
 function formato(n){
   const signo = n < 0 ? "-" : "";
@@ -300,10 +309,136 @@ function toast(msg){
   setTimeout(() => t.style.display = "none", 1600);
 }
 
-function actualizarEstadoConexion(){
-  const note = document.getElementById("offlineNote");
+function abrirDB(){
+  if(dbPromise) return dbPromise;
+
+  dbPromise = new Promise((resolve,reject)=>{
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+    req.onupgradeneeded = () => {
+      const db = req.result;
+
+      if(!db.objectStoreNames.contains(STORE_STATE)){
+        db.createObjectStore(STORE_STATE);
+      }
+
+      if(!db.objectStoreNames.contains(STORE_OUTBOX)){
+        db.createObjectStore(STORE_OUTBOX, {keyPath:"id"});
+      }
+    };
+
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+
+  return dbPromise;
+}
+
+async function dbGet(storeName, key){
+  const db = await abrirDB();
+
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(storeName, "readonly");
+    const store = tx.objectStore(storeName);
+    const req = store.get(key);
+
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbPut(storeName, value, key){
+  const db = await abrirDB();
+
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(storeName, "readwrite");
+    const store = tx.objectStore(storeName);
+
+    const req = key === undefined
+      ? store.put(value)
+      : store.put(value, key);
+
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbDelete(storeName, key){
+  const db = await abrirDB();
+
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(storeName, "readwrite");
+    const store = tx.objectStore(storeName);
+    const req = store.delete(key);
+
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbGetAll(storeName){
+  const db = await abrirDB();
+
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(storeName, "readonly");
+    const store = tx.objectStore(storeName);
+    const req = store.getAll();
+
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function guardarEstadoLocal(){
+  await dbPut(STORE_STATE, {
+    categorias,
+    gastos,
+    periodo:periodoActualTexto,
+    guardadoEn:new Date().toISOString()
+  }, "current");
+}
+
+async function cargarEstadoLocal(){
+  const local = await dbGet(STORE_STATE, "current");
+
+  if(!local) return false;
+
+  categorias = Array.isArray(local.categorias) ? local.categorias : [];
+  gastos = Array.isArray(local.gastos) ? local.gastos : [];
+  periodoActualTexto = local.periodo || "Mes actual";
+
+  document.getElementById("periodoActual").textContent = periodoActualTexto;
+  render();
+
+  return true;
+}
+
+async function cantidadPendientes(){
+  const pendientes = await dbGetAll(STORE_OUTBOX);
+  return pendientes.length;
+}
+
+async function actualizarEstadoConexion(){
+  const note = document.getElementById("syncNote");
   if(!note) return;
-  note.style.display = navigator.onLine ? "none" : "block";
+
+  const pendientes = await cantidadPendientes();
+
+  if(!navigator.onLine){
+    note.style.display = "block";
+    note.textContent = pendientes > 0
+      ? "Sin conexión · " + pendientes + " gasto" + (pendientes===1?"":"s") + " pendiente" + (pendientes===1?"":"s") + " de sincronizar."
+      : "Sin conexión · usando los últimos datos guardados en este teléfono.";
+    return;
+  }
+
+  if(pendientes > 0){
+    note.style.display = "block";
+    note.textContent = pendientes + " gasto" + (pendientes===1?"":"s") + " pendiente" + (pendientes===1?"":"s") + " de sincronizar.";
+  }else{
+    note.style.display = "none";
+    note.textContent = "";
+  }
 }
 
 function mostrarLogin(mensaje=""){
@@ -379,6 +514,12 @@ async function entrarConPin(){
     return;
   }
 
+  if(!navigator.onLine){
+    document.getElementById("pinError").textContent =
+      "Necesitas conexión la primera vez para validar el PIN.";
+    return;
+  }
+
   boton.disabled = true;
   boton.textContent = "Comprobando...";
 
@@ -409,6 +550,16 @@ async function cargarDatos(){
     return;
   }
 
+  if(!navigator.onLine){
+    const hayLocal = await cargarEstadoLocal();
+
+    document.getElementById("estado").textContent =
+      hayLocal ? "Sin conexión · datos locales" : "Sin conexión · sin datos guardados";
+
+    await actualizarEstadoConexion();
+    return;
+  }
+
   try{
     document.getElementById("estado").textContent = "Actualizando...";
 
@@ -424,22 +575,64 @@ async function cargarDatos(){
       return;
     }
 
+    const pendientes = await dbGetAll(STORE_OUTBOX);
+    const idsPendientes = new Set(pendientes.map(p => p.id));
+
     categorias = data.categorias || [];
     gastos = data.gastos || [];
+    periodoActualTexto = data.periodo || "Mes actual";
 
-    document.getElementById("periodoActual").textContent =
-      data.periodo || "Mes actual";
+    // Si alguno de los pendientes ya aparece en el servidor,
+    // se elimina de la cola.
+    for(const g of gastos){
+      if(g.id && idsPendientes.has(g.id)){
+        await dbDelete(STORE_OUTBOX, g.id);
+      }
+    }
+
+    // Volvemos a leer la cola porque puede haber cambiado.
+    const siguenPendientes = await dbGetAll(STORE_OUTBOX);
+
+    // Los pendientes que todavía no están en servidor se muestran
+    // localmente para no desaparecer durante la sincronización.
+    for(const p of siguenPendientes){
+      if(!gastos.some(g => g.id === p.id)){
+        gastos.push({...p, pending:true});
+      }
+    }
+
+    recalcularCategoriasConGastos();
+    document.getElementById("periodoActual").textContent = periodoActualTexto;
 
     render();
+    await guardarEstadoLocal();
 
     document.getElementById("estado").textContent =
       "Actualizado " + new Date().toLocaleTimeString("es-CL");
+
+    await actualizarEstadoConexion();
   }catch(e){
+    const hayLocal = await cargarEstadoLocal();
+
     document.getElementById("estado").textContent =
-      navigator.onLine
-        ? "No se pudieron cargar los datos."
-        : "Sin conexión.";
+      hayLocal ? "Sin conexión · datos locales" : "No se pudieron cargar los datos.";
+
+    await actualizarEstadoConexion();
   }
+}
+
+function recalcularCategoriasConGastos(){
+  categorias = categorias.map(c => {
+    const gastado = gastos
+      .filter(g => g.categoria === c.categoria)
+      .reduce((total,g) => total + Number(g.monto || 0), 0);
+
+    return {
+      ...c,
+      gastado,
+      saldo:Number(c.presupuesto || 0) - gastado
+    };
+  });
 }
 
 function formatearMontoInput(input){
@@ -460,6 +653,14 @@ function slug(texto){
   return encodeURIComponent(texto).replace(/%/g,"_");
 }
 
+function generarId(){
+  if(window.crypto && crypto.randomUUID){
+    return crypto.randomUUID();
+  }
+
+  return "bnp-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+}
+
 function toggleCategoria(nombre){
   categoriaAbierta = categoriaAbierta === nombre ? null : nombre;
   renderCategorias();
@@ -473,11 +674,6 @@ function toggleCategoria(nombre){
 }
 
 async function registrarGastoEnCategoria(nombre){
-  if(!navigator.onLine){
-    alert("Todavía no está habilitado el registro offline. Conéctate a internet para registrar este gasto.");
-    return;
-  }
-
   const sufijo = slug(nombre);
 
   const montoInput = document.getElementById("monto-" + sufijo);
@@ -501,35 +697,95 @@ async function registrarGastoEnCategoria(nombre){
     return;
   }
 
-  boton.disabled = true;
-  boton.textContent = "Registrando...";
+  const gasto = {
+    id:generarId(),
+    fecha:new Date().toISOString(),
+    categoria:nombre,
+    descripcion,
+    monto,
+    persona,
+    pending:true
+  };
+
+  await dbPut(STORE_OUTBOX, gasto);
+
+  gastos.push(gasto);
+  recalcularCategoriasConGastos();
+  render();
+  await guardarEstadoLocal();
+
+  montoInput.value = "";
+  descripcionInput.value = "";
+  personaSelect.value = "";
+
+  if(navigator.onLine){
+    toast("Gasto guardado · sincronizando");
+    sincronizarPendientes();
+  }else{
+    toast("Gasto guardado · pendiente de sincronizar");
+  }
+
+  await actualizarEstadoConexion();
+}
+
+async function sincronizarPendientes(){
+  if(sincronizando || !navigator.onLine || !pinActual) return;
+
+  sincronizando = true;
 
   try{
-    await postData({
-      action:"addExpense",
-      categoria:nombre,
-      descripcion,
-      monto,
-      persona
-    });
+    const pendientes = await dbGetAll(STORE_OUTBOX);
 
-    montoInput.value = "";
-    descripcionInput.value = "";
-    personaSelect.value = "";
+    for(const gasto of pendientes){
+      try{
+        await postData({
+          action:"addExpense",
+          id:gasto.id,
+          categoria:gasto.categoria,
+          descripcion:gasto.descripcion || "",
+          monto:Number(gasto.monto),
+          persona:gasto.persona || ""
+        });
+      }catch(e){
+        break;
+      }
+    }
 
-    toast("Gasto registrado ✓");
-    setTimeout(cargarDatos, 900);
+    // Como POST es no-cors, verificamos por GET cuáles IDs
+    // efectivamente llegaron al servidor.
+    await new Promise(resolve => setTimeout(resolve, 700));
+    await cargarDatos();
+
   }finally{
-    setTimeout(() => {
-      boton.disabled = false;
-      boton.textContent = "Registrar gasto";
-    }, 1000);
+    sincronizando = false;
+    await actualizarEstadoConexion();
   }
 }
 
 async function eliminarGasto(g){
+  // Si todavía no se sincronizó, se puede eliminar localmente
+  // incluso sin internet.
+  if(g.pending && g.id){
+    const confirmarPendiente = confirm(
+      "¿Eliminar este gasto pendiente?\n\n" +
+      (g.descripcion || "(sin descripción)") + "\n" +
+      formato(g.monto)
+    );
+
+    if(!confirmarPendiente) return;
+
+    await dbDelete(STORE_OUTBOX, g.id);
+    gastos = gastos.filter(x => x.id !== g.id);
+    recalcularCategoriasConGastos();
+    render();
+    await guardarEstadoLocal();
+    await actualizarEstadoConexion();
+    toast("Gasto pendiente eliminado");
+    return;
+  }
+
   if(!navigator.onLine){
-    alert("Necesitas conexión para eliminar un gasto.");
+    alert("Necesitas conexión para eliminar un gasto ya sincronizado.");
     return;
   }
 
@@ -547,6 +803,7 @@ async function eliminarGasto(g){
 
   await postData({
     action:"deleteExpense",
+    id:g.id || "",
     rowNumber:g.rowNumber,
     categoria:g.categoria,
     descripcion:g.descripcion || "",
@@ -578,7 +835,7 @@ function renderCategorias(){
 
   if(categorias.length === 0){
     cont.innerHTML =
-      "<div class='card small'>Todavía no hay categorías. Agrégalas en la pestaña Categorias del Google Sheet.</div>";
+      "<div class='card small'>Todavía no hay categorías guardadas en este teléfono.</div>";
     return;
   }
 
@@ -687,11 +944,14 @@ function renderHistorial(){
     return;
   }
 
-  gastos.slice().reverse().forEach(g => {
+  gastos.slice().sort((a,b) => new Date(b.fecha) - new Date(a.fecha)).forEach(g => {
     const div = document.createElement("div");
     div.className = "item";
 
     const persona = g.persona ? " · " + g.persona : "";
+    const pendiente = g.pending
+      ? '<div class="pending-badge">Pendiente de sincronizar</div>'
+      : "";
 
     div.innerHTML = `
       <div class="history-row">
@@ -700,6 +960,7 @@ function renderHistorial(){
           -${formato(g.monto)}<br>
           <span class="small">${g.categoria}${persona}</span><br>
           <span class="small">${new Date(g.fecha).toLocaleString("es-CL")}</span>
+          ${pendiente}
         </div>
 
         <button class="delete-btn">Eliminar</button>
@@ -742,17 +1003,24 @@ document.getElementById("logoutButton").addEventListener("click", () => {
   mostrarLogin();
 });
 
-window.addEventListener("online", () => {
-  actualizarEstadoConexion();
+window.addEventListener("online", async () => {
+  await actualizarEstadoConexion();
+
   if(pinActual){
-    cargarDatos();
+    await sincronizarPendientes();
   }
 });
 
 window.addEventListener("offline", actualizarEstadoConexion);
 
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "visible" && pinActual && navigator.onLine){
+    sincronizarPendientes();
+  }
+});
+
 async function iniciar(){
-  actualizarEstadoConexion();
+  await abrirDB();
 
   if(!pinActual){
     mostrarLogin();
@@ -760,7 +1028,17 @@ async function iniciar(){
   }
 
   mostrarApp();
-  await cargarDatos();
+
+  // Muestra la copia local inmediatamente, si existe.
+  await cargarEstadoLocal();
+
+  if(navigator.onLine){
+    await sincronizarPendientes();
+    await cargarDatos();
+  }else{
+    document.getElementById("estado").textContent = "Sin conexión · datos locales";
+    await actualizarEstadoConexion();
+  }
 }
 
 if("serviceWorker" in navigator){
@@ -775,7 +1053,7 @@ iniciar();
 
 setInterval(() => {
   if(pinActual && navigator.onLine){
-    cargarDatos();
+    sincronizarPendientes();
   }
 },30000);
 </script>
