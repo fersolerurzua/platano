@@ -69,14 +69,11 @@ button:disabled{opacity:.6;cursor:not-allowed}
   overflow:hidden;
   box-shadow:0 3px 12px rgba(96,58,32,.08);
 }
-.category-summary{
+.category-header{
   padding:16px;
   cursor:pointer;
   user-select:none;
-  list-style:none;
 }
-.category-summary::-webkit-details-marker{display:none}
-.category-summary::marker{display:none;content:""}
 .category-header-row{
   display:flex;
   justify-content:space-between;
@@ -95,11 +92,13 @@ button:disabled{opacity:.6;cursor:not-allowed}
   line-height:1;
   transition:transform .18s ease;
 }
-.category-card[open] .chevron{transform:rotate(180deg)}
+.category-card.open .chevron{transform:rotate(180deg)}
 .category-form{
+  display:none;
   padding:0 16px 16px;
   border-top:1px solid var(--border);
 }
+.category-card.open .category-form{display:block}
 .form-note{margin:12px 0 4px}
 .negative{color:var(--danger)}
 .progress{
@@ -110,6 +109,34 @@ button:disabled{opacity:.6;cursor:not-allowed}
   margin:9px 0 5px;
 }
 .bar{height:100%;width:0%}
+.history-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:18px;
+  margin-bottom:14px;
+  box-shadow:0 3px 12px rgba(96,58,32,.08);
+  overflow:hidden;
+}
+.history-header{
+  padding:16px;
+  cursor:pointer;
+  user-select:none;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.history-content{
+  display:none;
+  padding:0 16px 16px;
+  border-top:1px solid var(--border);
+}
+.history-card.open .history-content{display:block}
+.history-card.open .history-chevron{transform:rotate(180deg)}
+.history-chevron{
+  color:var(--muted);
+  font-size:20px;
+  transition:transform .18s ease;
+}
 .history-row{
   display:flex;
   justify-content:space-between;
@@ -160,9 +187,14 @@ button:disabled{opacity:.6;cursor:not-allowed}
   <div id="categorias"></div>
 </div>
 
-<div class="card">
-  <h3>Historial</h3>
-  <div id="historial"></div>
+<div class="history-card" id="historyCard">
+  <div class="history-header" id="historyHeader">
+    <h3 style="margin:0;">Historial</h3>
+    <div class="history-chevron">⌄</div>
+  </div>
+  <div class="history-content">
+    <div id="historial"></div>
+  </div>
 </div>
 
 <div id="toast">Listo</div>
@@ -172,6 +204,7 @@ const API_URL = "https://script.google.com/macros/s/AKfycbxRndn5iSDB_gWX-v5evcBM
 
 let categorias = [];
 let gastos = [];
+let categoriaAbierta = null;
 
 function formato(n){
   const signo = n < 0 ? "-" : "";
@@ -256,12 +289,16 @@ function slug(texto){
   return encodeURIComponent(texto).replace(/%/g,"_");
 }
 
-function cerrarOtrasCategorias(actual){
-  document.querySelectorAll("details.category-card").forEach(detalle => {
-    if(detalle !== actual){
-      detalle.removeAttribute("open");
-    }
-  });
+function toggleCategoria(nombre){
+  categoriaAbierta = categoriaAbierta === nombre ? null : nombre;
+  renderCategorias();
+
+  if(categoriaAbierta){
+    setTimeout(() => {
+      const campo = document.getElementById("monto-" + slug(nombre));
+      if(campo) campo.focus();
+    }, 80);
+  }
 }
 
 async function registrarGastoEnCategoria(nombre){
@@ -364,7 +401,7 @@ function renderCategorias(){
     return;
   }
 
-  categorias.forEach((c, index) => {
+  categorias.forEach(c => {
     const porcentajeReal = c.presupuesto > 0
       ? (c.gastado / c.presupuesto) * 100
       : 0;
@@ -379,14 +416,14 @@ function renderCategorias(){
       color = "#D98E5F";
     }
 
+    const abierta = categoriaAbierta === c.categoria;
     const sufijo = slug(c.categoria);
 
-    const details = document.createElement("details");
-    details.className = "category-card";
-    details.dataset.index = index;
+    const div = document.createElement("div");
+    div.className = "category-card" + (abierta ? " open" : "");
 
-    details.innerHTML = `
-      <summary class="category-summary">
+    div.innerHTML = `
+      <div class="category-header">
         <div class="category-header-row">
           <div style="width:100%">
             <div class="category-title">${c.categoria}</div>
@@ -408,7 +445,7 @@ function renderCategorias(){
 
           <div class="chevron">⌄</div>
         </div>
-      </summary>
+      </div>
 
       <div class="category-form">
         <div class="small form-note">
@@ -440,29 +477,22 @@ function renderCategorias(){
       </div>
     `;
 
-    const montoInput = details.querySelector("#monto-" + sufijo);
+    div.querySelector(".category-header").addEventListener("click", () => {
+      toggleCategoria(c.categoria);
+    });
+
+    const montoInput = div.querySelector("#monto-" + sufijo);
     montoInput.addEventListener("input", () => {
       formatearMontoInput(montoInput);
     });
 
-    details.querySelector("#boton-" + sufijo).addEventListener("click", event => {
+    div.querySelector("#boton-" + sufijo).addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
       registrarGastoEnCategoria(c.categoria);
     });
 
-    details.addEventListener("toggle", () => {
-      if(details.open){
-        cerrarOtrasCategorias(details);
-
-        setTimeout(() => {
-          const campo = details.querySelector("#monto-" + sufijo);
-          if(campo) campo.focus();
-        }, 100);
-      }
-    });
-
-    cont.appendChild(details);
+    cont.appendChild(div);
   });
 }
 
@@ -490,6 +520,7 @@ function renderHistorial(){
           <span class="small">${g.categoria}${persona}</span><br>
           <span class="small">${new Date(g.fecha).toLocaleString("es-CL")}</span>
         </div>
+
         <button class="delete-btn">Eliminar</button>
       </div>
     `;
@@ -501,6 +532,10 @@ function renderHistorial(){
     cont.appendChild(div);
   });
 }
+
+document.getElementById("historyHeader").addEventListener("click", () => {
+  document.getElementById("historyCard").classList.toggle("open");
+});
 
 cargarDatos();
 setInterval(cargarDatos,30000);
