@@ -69,11 +69,14 @@ button:disabled{opacity:.6;cursor:not-allowed}
   overflow:hidden;
   box-shadow:0 3px 12px rgba(96,58,32,.08);
 }
-.category-header{
+.category-summary{
   padding:16px;
   cursor:pointer;
   user-select:none;
+  list-style:none;
 }
+.category-summary::-webkit-details-marker{display:none}
+.category-summary::marker{display:none;content:""}
 .category-header-row{
   display:flex;
   justify-content:space-between;
@@ -92,13 +95,11 @@ button:disabled{opacity:.6;cursor:not-allowed}
   line-height:1;
   transition:transform .18s ease;
 }
-.category-card.open .chevron{transform:rotate(180deg)}
+.category-card[open] .chevron{transform:rotate(180deg)}
 .category-form{
-  display:none;
   padding:0 16px 16px;
   border-top:1px solid var(--border);
 }
-.category-card.open .category-form{display:block}
 .form-note{margin:12px 0 4px}
 .negative{color:var(--danger)}
 .progress{
@@ -171,7 +172,6 @@ const API_URL = "https://script.google.com/macros/s/AKfycbxRndn5iSDB_gWX-v5evcBM
 
 let categorias = [];
 let gastos = [];
-let categoriaAbierta = null;
 
 function formato(n){
   const signo = n < 0 ? "-" : "";
@@ -256,16 +256,12 @@ function slug(texto){
   return encodeURIComponent(texto).replace(/%/g,"_");
 }
 
-function toggleCategoria(nombre){
-  categoriaAbierta = categoriaAbierta === nombre ? null : nombre;
-  renderCategorias();
-
-  if(categoriaAbierta){
-    setTimeout(() => {
-      const campo = document.getElementById("monto-" + slug(nombre));
-      if(campo) campo.focus();
-    }, 80);
-  }
+function cerrarOtrasCategorias(actual){
+  document.querySelectorAll("details.category-card").forEach(detalle => {
+    if(detalle !== actual){
+      detalle.removeAttribute("open");
+    }
+  });
 }
 
 async function registrarGastoEnCategoria(nombre){
@@ -368,7 +364,7 @@ function renderCategorias(){
     return;
   }
 
-  categorias.forEach(c => {
+  categorias.forEach((c, index) => {
     const porcentajeReal = c.presupuesto > 0
       ? (c.gastado / c.presupuesto) * 100
       : 0;
@@ -383,41 +379,47 @@ function renderCategorias(){
       color = "#D98E5F";
     }
 
-    const abierta = categoriaAbierta === c.categoria;
     const sufijo = slug(c.categoria);
 
-    const div = document.createElement("div");
-    div.className = "category-card" + (abierta ? " open" : "");
+    const details = document.createElement("details");
+    details.className = "category-card";
+    details.dataset.index = index;
 
-    div.innerHTML = `
-      <div class="category-header">
+    details.innerHTML = `
+      <summary class="category-summary">
         <div class="category-header-row">
           <div style="width:100%">
             <div class="category-title">${c.categoria}</div>
+
             <div class="category-balance ${c.saldo<0?"negative":""}">
               ${formato(c.saldo)}
             </div>
+
             <div class="small">
               Presupuesto: ${formato(c.presupuesto)} · Gastado: ${formato(c.gastado)}
             </div>
+
             <div class="progress">
               <div class="bar" style="width:${anchoBarra}%;background:${color}"></div>
             </div>
+
             <div class="small">${Math.round(porcentajeReal)}% usado</div>
           </div>
+
           <div class="chevron">⌄</div>
         </div>
-      </div>
+      </summary>
 
-      <div class="category-form" onclick="event.stopPropagation()">
-        <div class="small form-note">Registrar gasto en ${c.categoria}</div>
+      <div class="category-form">
+        <div class="small form-note">
+          Registrar gasto en ${c.categoria}
+        </div>
 
         <input
           type="text"
           inputmode="numeric"
           id="monto-${sufijo}"
           placeholder="Monto"
-          oninput="formatearMontoInput(this)"
         >
 
         <input
@@ -438,16 +440,29 @@ function renderCategorias(){
       </div>
     `;
 
-    div.querySelector(".category-header").addEventListener("click", () => {
-      toggleCategoria(c.categoria);
+    const montoInput = details.querySelector("#monto-" + sufijo);
+    montoInput.addEventListener("input", () => {
+      formatearMontoInput(montoInput);
     });
 
-    div.querySelector("#boton-" + sufijo).addEventListener("click", (event) => {
+    details.querySelector("#boton-" + sufijo).addEventListener("click", event => {
+      event.preventDefault();
       event.stopPropagation();
       registrarGastoEnCategoria(c.categoria);
     });
 
-    cont.appendChild(div);
+    details.addEventListener("toggle", () => {
+      if(details.open){
+        cerrarOtrasCategorias(details);
+
+        setTimeout(() => {
+          const campo = details.querySelector("#monto-" + sufijo);
+          if(campo) campo.focus();
+        }, 100);
+      }
+    });
+
+    cont.appendChild(details);
   });
 }
 
