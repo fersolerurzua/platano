@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bananapp</title>
 
+<link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="icon" type="image/png" href="icon.png">
+<meta name="theme-color" content="#B85C38">
 
 <style>
 :root{
@@ -187,6 +189,16 @@ button:disabled{opacity:.6;cursor:not-allowed}
   color:var(--muted);
   border:1px solid var(--border);
 }
+.offline-note{
+  display:none;
+  margin-bottom:12px;
+  padding:9px 12px;
+  border-radius:12px;
+  background:#FFF4DE;
+  border:1px solid #E8D1A5;
+  color:#7A5A22;
+  font-size:13px;
+}
 #toast{
   display:none;
   position:fixed;
@@ -230,6 +242,10 @@ button:disabled{opacity:.6;cursor:not-allowed}
 
 <h1>Bananapp</h1>
 <div class="brand-subtitle">by TarTeTaTin</div>
+
+<div id="offlineNote" class="offline-note">
+  Sin conexión. Bananapp puede abrirse, pero todavía no guarda gastos nuevos offline.
+</div>
 
 <div class="logout-row">
   <button class="logout-btn" id="logoutButton">Olvidar PIN</button>
@@ -284,6 +300,12 @@ function toast(msg){
   setTimeout(() => t.style.display = "none", 1600);
 }
 
+function actualizarEstadoConexion(){
+  const note = document.getElementById("offlineNote");
+  if(!note) return;
+  note.style.display = navigator.onLine ? "none" : "block";
+}
+
 function mostrarLogin(mensaje=""){
   document.getElementById("appContent").style.display = "none";
   document.getElementById("pinScreen").style.display = "block";
@@ -295,6 +317,7 @@ function mostrarLogin(mensaje=""){
 function mostrarApp(){
   document.getElementById("pinScreen").style.display = "none";
   document.getElementById("appContent").style.display = "block";
+  actualizarEstadoConexion();
 }
 
 function jsonp(params){
@@ -413,7 +436,9 @@ async function cargarDatos(){
       "Actualizado " + new Date().toLocaleTimeString("es-CL");
   }catch(e){
     document.getElementById("estado").textContent =
-      "No se pudieron cargar los datos.";
+      navigator.onLine
+        ? "No se pudieron cargar los datos."
+        : "Sin conexión.";
   }
 }
 
@@ -448,6 +473,11 @@ function toggleCategoria(nombre){
 }
 
 async function registrarGastoEnCategoria(nombre){
+  if(!navigator.onLine){
+    alert("Todavía no está habilitado el registro offline. Conéctate a internet para registrar este gasto.");
+    return;
+  }
+
   const sufijo = slug(nombre);
 
   const montoInput = document.getElementById("monto-" + sufijo);
@@ -498,6 +528,11 @@ async function registrarGastoEnCategoria(nombre){
 }
 
 async function eliminarGasto(g){
+  if(!navigator.onLine){
+    alert("Necesitas conexión para eliminar un gasto.");
+    return;
+  }
+
   const persona = g.persona ? " · " + g.persona : "";
   const descripcion = g.descripcion || "(sin descripción)";
 
@@ -707,7 +742,18 @@ document.getElementById("logoutButton").addEventListener("click", () => {
   mostrarLogin();
 });
 
+window.addEventListener("online", () => {
+  actualizarEstadoConexion();
+  if(pinActual){
+    cargarDatos();
+  }
+});
+
+window.addEventListener("offline", actualizarEstadoConexion);
+
 async function iniciar(){
+  actualizarEstadoConexion();
+
   if(!pinActual){
     mostrarLogin();
     return;
@@ -717,10 +763,18 @@ async function iniciar(){
   await cargarDatos();
 }
 
+if("serviceWorker" in navigator){
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("./service-worker.js")
+      .catch(() => {});
+  });
+}
+
 iniciar();
 
 setInterval(() => {
-  if(pinActual){
+  if(pinActual && navigator.onLine){
     cargarDatos();
   }
 },30000);
