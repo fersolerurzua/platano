@@ -153,6 +153,40 @@ button:disabled{opacity:.6;cursor:not-allowed}
   color:var(--danger);
   border:1px solid rgba(178,58,72,.22);
 }
+.pin-screen{
+  display:none;
+}
+.pin-card{
+  max-width:380px;
+  margin:40px auto 0;
+}
+.pin-input{
+  text-align:center;
+  letter-spacing:.35em;
+  font-size:24px;
+}
+.pin-error{
+  color:var(--danger);
+  font-size:13px;
+  min-height:18px;
+  margin-top:6px;
+}
+.app-content{
+  display:none;
+}
+.logout-row{
+  text-align:right;
+  margin-top:-8px;
+  margin-bottom:12px;
+}
+.logout-btn{
+  width:auto;
+  font-size:12px;
+  padding:6px 9px;
+  background:transparent;
+  color:var(--muted);
+  border:1px solid var(--border);
+}
 #toast{
   display:none;
   position:fixed;
@@ -170,8 +204,36 @@ button:disabled{opacity:.6;cursor:not-allowed}
 
 <body>
 
+<div id="pinScreen" class="pin-screen">
+  <div class="pin-card card">
+    <h1 style="margin-top:0;">Bananapp</h1>
+    <div class="brand-subtitle">by TarTeTaTin</div>
+
+    <div class="label">PIN de acceso</div>
+    <input
+      type="password"
+      inputmode="numeric"
+      maxlength="4"
+      pattern="[0-9]*"
+      id="pinInput"
+      class="pin-input"
+      placeholder="••••"
+      autocomplete="off"
+    >
+    <button id="pinButton">Entrar</button>
+    <div id="pinError" class="pin-error"></div>
+    <div class="small">El PIN quedará guardado en este teléfono.</div>
+  </div>
+</div>
+
+<div id="appContent" class="app-content">
+
 <h1>Bananapp</h1>
 <div class="brand-subtitle">by TarTeTaTin</div>
+
+<div class="logout-row">
+  <button class="logout-btn" id="logoutButton">Olvidar PIN</button>
+</div>
 
 <div class="card">
   <div class="label">Período actual</div>
@@ -197,14 +259,18 @@ button:disabled{opacity:.6;cursor:not-allowed}
   </div>
 </div>
 
+</div>
+
 <div id="toast">Listo</div>
 
 <script>
 const API_URL = "https://script.google.com/macros/s/AKfycbxRndn5iSDB_gWX-v5evcBMJeTG6fEIpolJvpfLlRoCAyIbmBS9lZywmMdVWHqQ8lL0/exec";
+const PIN_KEY = "bananapp_pin";
 
 let categorias = [];
 let gastos = [];
 let categoriaAbierta = null;
+let pinActual = localStorage.getItem(PIN_KEY) || "";
 
 function formato(n){
   const signo = n < 0 ? "-" : "";
@@ -216,6 +282,19 @@ function toast(msg){
   t.textContent = msg;
   t.style.display = "block";
   setTimeout(() => t.style.display = "none", 1600);
+}
+
+function mostrarLogin(mensaje=""){
+  document.getElementById("appContent").style.display = "none";
+  document.getElementById("pinScreen").style.display = "block";
+  document.getElementById("pinError").textContent = mensaje;
+  document.getElementById("pinInput").value = "";
+  setTimeout(() => document.getElementById("pinInput").focus(), 100);
+}
+
+function mostrarApp(){
+  document.getElementById("pinScreen").style.display = "none";
+  document.getElementById("appContent").style.display = "block";
 }
 
 function jsonp(params){
@@ -246,14 +325,81 @@ async function postData(data){
     method:"POST",
     mode:"no-cors",
     headers:{"Content-Type":"text/plain;charset=utf-8"},
-    body:JSON.stringify(data)
+    body:JSON.stringify({
+      ...data,
+      pin: pinActual
+    })
   });
 }
 
+async function validarPin(pin){
+  try{
+    const data = await jsonp({
+      action:"data",
+      pin
+    });
+
+    return data && data.success !== false;
+  }catch(e){
+    return false;
+  }
+}
+
+async function entrarConPin(){
+  const input = document.getElementById("pinInput");
+  const boton = document.getElementById("pinButton");
+  const pin = input.value.replace(/\D/g, "");
+
+  if(pin.length !== 4){
+    document.getElementById("pinError").textContent =
+      "Ingresa un PIN de 4 dígitos.";
+    return;
+  }
+
+  boton.disabled = true;
+  boton.textContent = "Comprobando...";
+
+  try{
+    const correcto = await validarPin(pin);
+
+    if(!correcto){
+      document.getElementById("pinError").textContent = "PIN incorrecto.";
+      input.value = "";
+      input.focus();
+      return;
+    }
+
+    pinActual = pin;
+    localStorage.setItem(PIN_KEY, pinActual);
+
+    mostrarApp();
+    await cargarDatos();
+  }finally{
+    boton.disabled = false;
+    boton.textContent = "Entrar";
+  }
+}
+
 async function cargarDatos(){
+  if(!pinActual){
+    mostrarLogin();
+    return;
+  }
+
   try{
     document.getElementById("estado").textContent = "Actualizando...";
-    const data = await jsonp({action:"data"});
+
+    const data = await jsonp({
+      action:"data",
+      pin: pinActual
+    });
+
+    if(data && data.success === false){
+      localStorage.removeItem(PIN_KEY);
+      pinActual = "";
+      mostrarLogin("El PIN guardado ya no es válido.");
+      return;
+    }
 
     categorias = data.categorias || [];
     gastos = data.gastos || [];
@@ -537,8 +683,47 @@ document.getElementById("historyHeader").addEventListener("click", () => {
   document.getElementById("historyCard").classList.toggle("open");
 });
 
-cargarDatos();
-setInterval(cargarDatos,30000);
+document.getElementById("pinInput").addEventListener("input", e => {
+  e.target.value = e.target.value.replace(/\D/g, "").slice(0,4);
+});
+
+document.getElementById("pinInput").addEventListener("keydown", e => {
+  if(e.key === "Enter"){
+    entrarConPin();
+  }
+});
+
+document.getElementById("pinButton").addEventListener("click", entrarConPin);
+
+document.getElementById("logoutButton").addEventListener("click", () => {
+  if(!confirm("¿Olvidar el PIN guardado en este teléfono?")) return;
+
+  localStorage.removeItem(PIN_KEY);
+  pinActual = "";
+  categorias = [];
+  gastos = [];
+  categoriaAbierta = null;
+
+  mostrarLogin();
+});
+
+async function iniciar(){
+  if(!pinActual){
+    mostrarLogin();
+    return;
+  }
+
+  mostrarApp();
+  await cargarDatos();
+}
+
+iniciar();
+
+setInterval(() => {
+  if(pinActual){
+    cargarDatos();
+  }
+},30000);
 </script>
 
 </body>
