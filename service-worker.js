@@ -1,4 +1,4 @@
-const CACHE_NAME = "bananapp-v1";
+const CACHE_NAME = "bananapp-v2";
 
 const APP_SHELL = [
   "./",
@@ -11,6 +11,7 @@ self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL))
   );
+
   self.skipWaiting();
 });
 
@@ -24,6 +25,7 @@ self.addEventListener("activate", event => {
       )
     )
   );
+
   self.clients.claim();
 });
 
@@ -34,30 +36,39 @@ self.addEventListener("fetch", event => {
   if (url.origin !== self.location.origin) return;
   if (request.method !== "GET") return;
 
+  // Al abrir Bananapp:
+  // con internet trae la versión nueva;
+  // sin internet usa la última versión guardada.
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
         .then(response => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put("./index.html", copy));
+          const copia = response.clone();
+
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put("./index.html", copia);
+          });
+
           return response;
         })
-        .catch(() =>
-          caches.match(request).then(response =>
-            response || caches.match("./index.html")
-          )
-        )
+        .catch(() => caches.match("./index.html"))
     );
+
     return;
   }
 
+  // Recursos estáticos
   event.respondWith(
     caches.match(request).then(cached => {
       if (cached) return cached;
 
       return fetch(request).then(response => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+        const copia = response.clone();
+
+        caches.open(CACHE_NAME).then(cache => {
+          cache.put(request, copia);
+        });
+
         return response;
       });
     })
